@@ -2072,7 +2072,7 @@ final class UnitTests: XCTestCase {
         // If only one previous token was a timestamp, filter all text and non-decreasing timestamps (to find matching timestamp pair)
         let logits4 = try MLMultiArray.logits([1.1, 5.2, 0.3, 0.4, 0.2, 0.1, 0.2, 0.1, 0.1])
         let result4 = tokensFilter.filterLogits(logits4, withTokens: [0, 4, 7])
-        XCTAssertEqual(result4.data(for: 2), [-.infinity, -.infinity, -.infinity, -.infinity, -.infinity, -.infinity, -.infinity, 0.1, 0.1])
+        XCTAssertEqual(result4.data(for: 2), [-FloatType.infinity, -FloatType.infinity, -FloatType.infinity, -FloatType.infinity, -FloatType.infinity, -FloatType.infinity, -FloatType.infinity, 0.1, 0.1])
     }
 
     func testTimestampRulesFilterMultilingual() throws {
@@ -2108,7 +2108,7 @@ final class UnitTests: XCTestCase {
         // After transcribe token with text and single timestamp (should force timestamp tokens)
         let logits4 = try MLMultiArray.logits([1.1, 5.2, 0.3, 0.4, 0.2, 0.1, 0.2, 0.1, 0.1])
         let result4 = tokensFilter.filterLogits(logits4, withTokens: [0, 4, 0, 7])
-        XCTAssertEqual(result4.data(for: 2), [-.infinity, -.infinity, -.infinity, -.infinity, -.infinity, -.infinity, -.infinity, 0.1, 0.1])
+        XCTAssertEqual(result4.data(for: 2), [-FloatType.infinity, -FloatType.infinity, -FloatType.infinity, -FloatType.infinity, -FloatType.infinity, -FloatType.infinity, -FloatType.infinity, 0.1, 0.1])
     }
 
     // MARK: - VAD Tests
