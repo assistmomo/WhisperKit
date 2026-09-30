@@ -43,8 +43,8 @@ open class GreedyTokenSampler: TokenSampling {
         // Use MLTensor operations if available for sampling
         // Reference: https://github.com/huggingface/swift-transformers/blob/preview/Sources/Generation/Decoders.swift
         var logitsTensor = MLTensor(MLShapedArray<FloatType>(logits)).cast(to: Float.self)
-        var nextTokenTensor: MLTensor
-        var nextLogprobTensor: MLTensor
+        let nextTokenTensor: MLTensor
+        let nextLogprobTensor: MLTensor
 
         if temperature != 0.0 {
             // Scale logits by temperature if > 0
@@ -57,20 +57,7 @@ open class GreedyTokenSampler: TokenSampling {
         if temperature != 0.0 {
             // top-k multinomial sampling
             let (topKProbs, topKIndices) = softmaxScores.topK(decodingOptions.topK)
-
-            let rnd = topKProbs.sum() * Float.random(in: 0..<1)
-            var accumTopKProbs = topKProbs.cumulativeSum(alongAxis: -1)
-            accumTopKProbs += (accumTopKProbs .< rnd) * 100.0
-            let topKIndex = accumTopKProbs.argsort()[..., 0]
-
-            nextTokenTensor = topKIndices.gathering(
-                atIndices: topKIndex,
-                alongAxis: topKIndices.rank - 1
-            )
-            nextLogprobTensor = topKProbs.gathering(
-                atIndices: topKIndex,
-                alongAxis: topKIndices.rank - 1
-            ).log()
+            return Self.sampleTopK(topKProbs: topKProbs, topKIndices: topKIndices, uniform: Float.random(in: 0..<1))
         } else {
             nextTokenTensor = logitsTensor.argmax(alongAxis: -1)
             nextLogprobTensor = softmaxScores.gathering(atIndices: nextTokenTensor, alongAxis: -1).log()
@@ -81,7 +68,37 @@ open class GreedyTokenSampler: TokenSampling {
             logprob: nextLogprobTensor.asFloatArray()[0]
         )
     }
+
+    /// One top-k multinomial draw from `topKProbs` (probabilities in descending order) and their token ids.
+    /// `uniform` is the random draw in `[0, 1)`; it is a parameter so tests can pin it.
+    ///
+    /// The previous selection, `accumTopKProbs.argsort()[..., 0]`, relies on the order `argsort` gives to equal keys,
+    /// which is unspecified. When the tail probabilities fall below float32 resolution relative to the top-1
+    /// (e.g. `[1.0, 1.9e-25, 5.8e-30, 7.4e-31, 6.1e-32]`), every cumulative sum rounds to `1.0`, no key receives the
+    /// `+100` offset, and `argsort` can return a later position (position 2 on macOS 26, Apple Silicon). When that
+    /// token is end-of-text, the fallback pass ends with an empty transcription. Equal keys now resolve to the earliest
+    /// (most probable) position. Draws without ties pick the same position as before.
+    @available(macOS 15, iOS 18, watchOS 11, visionOS 2, *)
+    static func sampleTopK(topKProbs: MLTensor, topKIndices: MLTensor, uniform: Float) -> (token: Int, logprob: Float) {
+        let rnd = topKProbs.sum() * uniform
+        var accumTopKProbs = topKProbs.cumulativeSum(alongAxis: -1)
+        accumTopKProbs += (accumTopKProbs .< rnd) * 100.0
+        let position = firstMinimumPosition(accumTopKProbs.asFloatArray())
+        return (
+            token: topKIndices.asIntArray()[position],
+            logprob: log(topKProbs.asFloatArray()[position])
+        )
+    }
     #endif
+
+    /// Position of the smallest key; equal keys resolve to the earliest position.
+    static func firstMinimumPosition(_ keys: [Float]) -> Int {
+        var best = 0
+        for position in keys.indices where keys[position] < keys[best] {
+            best = position
+        }
+        return best
+    }
 
     private func sampleWithBNNS(logits: MLMultiArray) -> (token: Int, logprob: Float) {
         // TODO: BNNS operations here are deprecated, replace with vDSP or MLX
